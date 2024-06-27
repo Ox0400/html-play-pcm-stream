@@ -1,0 +1,148 @@
+<!--
+Filename: /Users/zhipeng/Desktop/ChatTTS/play-pcm.html
+Path: /Users/zhipeng/Desktop/ChatTTS
+Created Date: Friday, June 7th 2024, 3:46:41 pm
+Author: zhipeng
+
+Copyright (c) 2024 zhipeng
+
+Play RAW(PCM) Audio on browser;
+-->
+
+<!doctype html>
+<html>
+ 
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="/static/js/bootstrap.min.css" rel="stylesheet">
+	<title>Test</title>
+	<script type="text/javascript">
+		var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+		// Stereo
+		var channels = 1;
+		var samplerate = 16000;
+		var bitrate = 16;
+		var soundsCache = {};
+
+		function decode_pcm(chunk) {
+			// Create an empty two second stereo buffer at the
+			// sample rate of the AudioContext
+			var frameCount = chunk.length / 2;
+			var myAudioBuffer = audioCtx.createBuffer(channels, frameCount, samplerate);
+			for (var channel = 0; channel < channels; channel++) {
+				var nowBuffering = myAudioBuffer.getChannelData(channel, bitrate, samplerate);
+				for (var i = 0; i < frameCount; i++) {
+					// audio needs to be in [-1.0; 1.0]
+					// for this reason I also tried to divide it by 32767
+					// as my pcm sample is in 16-Bit. It plays still the
+					// same creepy sound less noisy.
+					var word = (chunk.charCodeAt(i * 2) & 0xff) + ((chunk.charCodeAt(i * 2 + 1) & 0xff) << 8);
+					nowBuffering[i] = ((word + 32768) % 65536 - 32768) / 32768.0;
+				}
+			}
+			return myAudioBuffer;
+		}
+
+		// play event mark;
+		// To notify the player to continue playback when the cached buff all played and new chunk is ready.
+		play_event = false;
+
+		function load_pcm_audio(soundName, callback) {
+			soundsCache[soundName] = [];
+			var req = new XMLHttpRequest();
+			audio_stream_url = encodeURIComponent(document.getElementById("text-pcm-url").value);
+			req.open('GET', audio_stream_url, true);
+			req.overrideMimeType('text\/plain; charset=x-user-defined');
+			totalBytes = 0; // total audio bytes
+			chunkIndex = -1; // chunk index
+			startPlayOffset = 0; // first start playback need cache chunks number;
+
+			req.onreadystatechange = function (e) {
+				console.info('Request state', req.readyState);
+
+				if(req.readyState >= 3) {
+					chunkIndex += 1;
+					var chunk = req.responseText.substr(totalBytes);
+					soundsCache[soundName].push(decode_pcm(chunk));
+
+					totalBytes += chunk.length;
+					// req.seenBytes = req.responseText.length;
+					console.log("Fetched chunk bytes: " + totalBytes + "; inc size: " + chunk.length);
+					if (chunkIndex == startPlayOffset || play_event) {
+						// wakeup player;
+						// first cached full chunks;
+						// or retrieved new chunk after all chunk be played;
+						callback(soundName);
+						play_event = false;
+					}
+				}
+				if (req.readyState == 4) {
+					// notify cached all chunk;
+					soundsCache[soundName].push('<STOP>');
+				}
+			};
+			req.send(null);
+		}
+
+		function realy_play(soundName) {
+			console.debug('call realy_play func');
+			// all chunks already played.
+			stoped = false;
+			function _play_chunk(){
+				if (!stoped && soundsCache[soundName].length == 0) {
+					// notify downloader, wakeup player again when new cache;
+					console.debug('wating new chunk');
+					play_event = true;
+					return;
+				};
+				play_event = false;
+				if (stoped){
+					console.debug('already stoped, break loop');
+					return;
+				};
+				// here is FIFO mode. Can also use index to take chunk to support replay it;
+				chunk = soundsCache[soundName].shift();
+				console.debug('start play  chunk: ' + chunk.length);
+				if (chunk == '<STOP>') {
+					// player.stop();
+					stoped = true;
+					console.debug('stopped player');
+					return;
+				};
+				// set the buffer in the AudioBufferSourceNode
+				player = audioCtx.createBufferSource();
+				player.buffer = chunk;
+				player.addEventListener(
+					'ended',
+					() => {
+						console.debug('chunk play done. try next ...')
+						player.disconnect();
+						player.stop();
+						_play_chunk();
+					},
+					{ once: true }
+				);
+
+				player.connect(audioCtx.destination);
+				player.start();
+			};
+			_play_chunk();
+
+		};
+
+		function play(soundName){
+			load_pcm_audio(soundName, realy_play);
+		}
+
+		function init() { }
+	</script>
+</head>
+
+<body onload="init();">
+	<div>
+		<textarea id="text-pcm-url" class="form-control d-block" rows="3" placeholder="Input url at here. (RAW(PCM) audio stream)"> </textarea>
+		<button id="btn-play-pcm" type="button" onclick="play('PCM')">Play PCM Audio Stream</button>
+	</div>
+</body>
+</html>
