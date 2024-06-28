@@ -51,7 +51,7 @@ Play RAW(PCM) Audio on browser;
 		function load_pcm_audio(soundName, callback) {
 			soundsCache[soundName] = [];
 			var req = new XMLHttpRequest();
-			audio_stream_url = encodeURIComponent(document.getElementById("text-pcm-url").value);
+			audio_stream_url = document.getElementById("text-pcm-url").value;
 			req.open('GET', audio_stream_url, true);
 			req.overrideMimeType('text\/plain; charset=x-user-defined');
 			totalBytes = 0; // total audio bytes
